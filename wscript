@@ -4,7 +4,7 @@ from waflib.extras.symwaf2ic import get_toplevel_path
 
 
 def depends(ctx):
-    pass
+    ctx("freia")
 
 
 def options(opt):
@@ -20,6 +20,8 @@ def build(bld):
     bld(name="aml-cinn",
         source=bld.path.ant_glob("src/py/**/*.py"),
         features="use py",
-        install_path="${PREFIX}/lib")
+        install_path="${PREFIX}/lib",
+        relative_trick=True,
+        install_from="src/py")
 
     bld.add_post_fun(summary)
