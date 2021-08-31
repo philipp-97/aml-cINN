@@ -21,7 +21,7 @@ from time import time
 import FrEIA.framework as Ff
 import FrEIA.modules as Fm
 
-from common import one_hot, MNISTData, baseCONFIG, \
+from .common import one_hot, MNISTData, baseCONFIG, \
                    Visualizer, LiveVisualizer, sample_outputs, \
                    style_transfer, interpolation, val_loss, show_samples
 
@@ -80,11 +80,16 @@ class CONFIG(baseCONFIG):
 
 
     # Paths
-    mnist_data = "mnist_data"
-    save_dir = "output/normal"
+    mnist_data = "../../../mnist_data"
+    save_dir = "../../../out/MNIST_floating"
 
-    load_file = "output/normal/checkpoint.pt"
-    filename = "output/normal/mnist_cinn.pt"
+    load_file = "../../../out/MNIST_floating/mnist_minimal_checkpoint.pt"
+    filename = "../../../out/MNIST_floating/mnist_minimal_cinn.pt"
+    #mnist_data = "mnist_data"
+    #save_dir = "output/normal"
+
+    #load_file = "output/normal/checkpoint.pt"
+    #filename = "output/normal/mnist_cinn.pt"
 
     checkpoint_save_interval =  120 * 3
     checkpoint_save_overwrite = True

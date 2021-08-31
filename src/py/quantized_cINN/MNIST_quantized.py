@@ -81,11 +81,11 @@ class CONFIG(baseCONFIG):
 
 
     # Paths
-    mnist_data = "mnist_data"
-    save_dir = "output/quantized"
+    mnist_data = "../../../mnist_data"
+    save_dir = "../../../out/MNIST_quantized"
 
-    load_file = "output/quantized/mnist_minimal_checkpoint.pt"
-    filename = "output/quantized/mnist_minimal_cinn.pt"
+    load_file = "../../../out/MNIST_quantized/mnist_minimal_checkpoint.pt"
+    filename = "../../../out/MNIST_quantized/mnist_minimal_cinn.pt"
 
     checkpoint_save_interval =  20
     checkpoint_save_overwrite = True
