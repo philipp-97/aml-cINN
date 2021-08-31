@@ -1,5 +1,5 @@
 **/core
 **/__pycache__
 mnist_data/**
-*_ABORT
-*_checkpoint*
+*.pt*
+*.pt
