@@ -556,10 +556,10 @@ def show_samples(model, data, config, label):
     '''produces and shows cINN samples for a given label (0-9)'''
 
     N_samples = 100
-    l = torch.cuda.LongTensor(N_samples)
+    l = torch.LongTensor(N_samples).to(config.device)
     l[:] = label
 
-    z = 1.0 * torch.randn(N_samples, np.prod(config.img_size)).cuda()
+    z = 1.0 * torch.randn(N_samples, np.prod(config.img_size)).to(config.device)
 
     with torch.no_grad():
         samples = model.reverse_sample(z, l)[0].cpu().numpy()

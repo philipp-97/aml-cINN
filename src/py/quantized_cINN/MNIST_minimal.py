@@ -238,7 +238,7 @@ def train(config):
 def evaluate(config):
     model = MNISTcINN_minimal(config)
     model.load(config.filename)
-    model.cinn.train(False)
+    model.eval()
     data = MNISTData(config)
 
     #for s in tqdm(range(0, 256)):
