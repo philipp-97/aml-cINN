@@ -39,7 +39,7 @@ class CONFIG(baseCONFIG):
 
     img_size = (28, 28)
     device = "cuda"
-    n_workers = 4
+    n_workers = 16
 
     # Training
     lr = 5e-4
@@ -54,7 +54,7 @@ class CONFIG(baseCONFIG):
 
     init_scale = 0.03
     pre_low_lr = 0
-    
+
     clip_grad_norm = 10.0
 
     # Architecture
@@ -84,7 +84,7 @@ class CONFIG(baseCONFIG):
     mnist_data = "../../../mnist_data"
     save_dir = "../../../out/MNIST_quantized"
 
-    load_file = "../../../out/MNIST_quantized/mnist_minimal_checkpoint.pt"
+    load_file = "../../../out/MINST_quantized/mnist_minimal_checkpoint.pt"
     filename = "../../../out/MNIST_quantized/mnist_minimal_cinn.pt"
 
     checkpoint_save_interval =  20
@@ -129,11 +129,11 @@ class MNISTcINN_quantized(nn.Module):
             width = self.c.internal_width
             dropout = self.c.fc_dropout
             net = OrderedDict([
-                ("quant", nn.quantized.Quantize(scale=30, zero_point=0, dtype=torch.qint8)),
-                ("fuco1", nn.quantized.Linear(ch_in, self.c.internal_width, dtype=torch.qint8)),
-                ("relu1", nn.quantized.ReLU()),
-                ("fuco2", nn.quantized.Linear(self.c.internal_width, ch_out, dtype=torch.qint8)),
-                ("dequa", nn.quantize.DeQuantize())])
+                ("quant", torch.quantization.QuantStub()),
+                ("fuco1", nn.Linear(ch_in, self.c.internal_width)),
+                ("relu1", nn.ReLU()),
+                ("fuco2", nn.Linear(self.c.internal_width, ch_out)),
+                ("dequa", torch.quantization.DeQuantStub())])
             return nn.Sequential(net)
 
         cond = Ff.ConditionNode(10)
@@ -152,6 +152,16 @@ class MNISTcINN_quantized(nn.Module):
 
         nodes += [cond, Ff.OutputNode(nodes[-1])]
         return Ff.ReversibleGraphNet(nodes, verbose=False)
+
+    def fuse_model(self):
+        # fuse the activations to preceding layers, where applicable
+        # this needs to be done manually depending on the model architecture
+        for module in self.cinn.modules():
+            if type(module) == nn.Sequential:
+                torch.quantization.fuse_modules(module, ["fuco1", "relu1"], inplace=True)
+
+
+        #return module_fused
 
     def forward(self, x, l, jac=True):
         return self.cinn(x, c=one_hot(l), jac=jac)
@@ -181,8 +191,27 @@ class MNISTcINN_quantized(nn.Module):
 ########################################################################
 # helper
 
+def pre_training_quantization(model_fp32):
+    # model must be set to train mode for QAT logic to work
+    model_fp32.train()
+
+    # attach a global qconfig, which contains information about what kind
+    # of observers to attach. Use 'fbgemm' for server inference and
+    # 'qnnpack' for mobile inference. Other quantization configurations such
+    # as selecting symmetric or assymetric quantization and MinMax or L2Norm
+    # calibration techniques can be specified here.
+    #module_fp32 = model_fp32.fuse_model()
+    model_fp32.fuse_model()
+
+    return model_fp32_prepared
+
+def post_training_quantization(model_fp32):
+
+    return res
+
 def train(config):
     model = MNISTcINN_quantized(config)
+    #model = pre_training_quantization(model)
     data = MNISTData(config)
 
     t_start = time()
@@ -203,7 +232,7 @@ def train(config):
                                         disable=(not config.progress_bar),
                                         ncols=83):
 
-                x, l = x.cuda(), l.cuda()
+                x, l = x.to(config.device), l.to(config.device)
                 z, log_j = model(x, l)
 
                 nll = torch.mean(z**2) / 2 - torch.mean(log_j) / np.prod(config.img_size)
@@ -238,7 +267,46 @@ def train(config):
             if (i_epoch % config.checkpoint_save_interval) == 0:
                 model.save(config.filename + '_checkpoint_%.4i' % (i_epoch * (1-config.checkpoint_save_overwrite)))
 
-        model.save(config.filename)
+        #model = post_training_quantization(model)
+
+        #####
+
+        config.device = "cpu"
+        model.c.device = "cpu"
+        data.c.device = "cpu"
+        model.to("cpu")
+
+        # Convert the observed model to a quantized model. This does several things:
+        # quantizes the weights, computes and stores the scale and bias value to be
+        # used with each activation tensor, fuses modules where appropriate,
+        # and replaces key operators with quantized implementations.
+        model.eval()
+        model.fuse_model()
+        model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        for module in model.cinn.modules():
+            module.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+
+        # Prepare the model for QAT. This inserts observers and fake_quants in
+        # the model that will observe weight and activation tensors during calibration.
+        model = torch.quantization.prepare(model)
+
+        print("before")
+        print(model.state_dict()["cinn.module_list.2.subnet1.quant.activation_post_process.activation_post_process.min_val"])
+        print(model.state_dict()["cinn.module_list.2.subnet1.quant.activation_post_process.activation_post_process.max_val"])
+        print(model.state_dict()["cinn.module_list.2.subnet1.fuco1.0.weight"])
+        for k in range(10):
+            show_samples(model, data, config, k)
+        print("after")
+        print(model.state_dict()["cinn.module_list.2.subnet1.quant.activation_post_process.activation_post_process.min_val"])
+        print(model.state_dict()["cinn.module_list.2.subnet1.quant.activation_post_process.activation_post_process.max_val"])
+        print(model.state_dict()["cinn.module_list.2.subnet1.fuco1.0.weight"])
+
+        model_int8 = torch.quantization.convert(model)
+        for k in range(10):
+            show_samples(model_int8, data, config, k)
+        #####
+
+        model_int8.save(config.filename)
 
     except BaseException as b:
         if config.checkpoint_on_error:
@@ -290,6 +358,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(config.str())
+
+    torch.backends.quantized.engine = 'fbgemm'
 
     if args.downloadMNIST:
         data = MNISTData(config)
