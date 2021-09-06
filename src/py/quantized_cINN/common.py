@@ -130,8 +130,8 @@ class MNISTDataPreprocessed:
         self.train_data.targets = self.train_data.targets[1024:]
 
         # Add the noise-augmentation to the (non-validation) training data:
-        augm_func = lambda x: x + self.c.add_image_noise * torch.randn_like(x)
-        self.train_data.transform = T.Compose([self.train_data.transform, augm_func])
+        #augm_func = lambda x: x + self.c.add_image_noise * torch.randn_like(x)
+        #self.train_data.transform = T.Compose([self.train_data.transform, augm_func])
 
         self.train_loader = DataLoader(self.train_data,
                                        batch_size=self.c.batch_size,
@@ -145,7 +145,7 @@ class MNISTDataPreprocessed:
                                       pin_memory=True, drop_last=True)
 
 
-def one_hot(labels, out=None):
+def one_hot(labels, out=None, scale=1.):
     '''
     Convert LongTensor labels (contains labels 0-9), to a one hot vector.
     Can be done in-place using the out-argument (faster, re-use of GPU memory)
@@ -155,7 +155,7 @@ def one_hot(labels, out=None):
     else:
         out.zeros_()
 
-    out.scatter_(dim=1, index=labels.view(-1,1), value=1.)
+    out.scatter_(dim=1, index=labels.view(-1,1), value=scale)
     return out
 
 ########################################################################
@@ -608,7 +608,7 @@ def show_samples(model, data, config, label):
 
     with torch.no_grad():
         samples = model.reverse_sample(z, l)[0].cpu().numpy()
-        if not data.maxpool:
+        if not config.maxpool:
             samples = data.unnormalize(samples)
 
     full_image = np.zeros((config.img_size[0] * 10, config.img_size[1] * 10))
