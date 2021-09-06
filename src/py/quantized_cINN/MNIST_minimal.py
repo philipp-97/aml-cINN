@@ -21,7 +21,7 @@ from time import time
 import FrEIA.framework as Ff
 import FrEIA.modules as Fm
 
-from common import one_hot, MNISTData, baseCONFIG, \
+from common import one_hot, MNISTData, MNISTDataPreprocessed, baseCONFIG, \
                    Visualizer, LiveVisualizer, sample_outputs, \
                    style_transfer, interpolation, val_loss, show_samples
 
@@ -36,6 +36,8 @@ class CONFIG(baseCONFIG):
     data_mean = 0.128
     data_std = 0.305
     add_image_noise = 0.08
+
+    maxpool = False
 
     img_size = (28, 28)
     device = "cuda"
@@ -54,7 +56,7 @@ class CONFIG(baseCONFIG):
 
     init_scale = 0.03
     pre_low_lr = 0
-    
+
     clip_grad_norm = 10.0
 
     # Architecture
@@ -173,7 +175,10 @@ class MNISTcINN_minimal(nn.Module):
 
 def train(config):
     model = MNISTcINN_minimal(config)
-    data = MNISTData(config)
+    if config.maxpool:
+        data = MNISTDataPreprocessed(config)
+    else:
+        data = MNISTData(config)
 
     t_start = time()
 
@@ -239,7 +244,10 @@ def evaluate(config):
     model = MNISTcINN_minimal(config)
     model.load(config.filename)
     model.eval()
-    data = MNISTData(config)
+    if config.maxpool:
+        data = MNISTDataPreprocessed(config)
+    else:
+        data = MNISTData(config)
 
     #for s in tqdm(range(0, 256)):
     #    torch.manual_seed(s)
@@ -276,6 +284,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=config.str())
     parser.add_argument("-t", "--train", action="store_true")
     parser.add_argument("-e", "--eval", action="store_true")
+    parser.add_argument("-m", "--maxpool", action="store_true")
     parser.add_argument("-d", "--downloadMNIST", action="store_true")
     args = parser.parse_args()
 
@@ -283,6 +292,16 @@ if __name__ == "__main__":
 
     if args.downloadMNIST:
         data = MNISTData(config)
+
+    if args.maxpool:
+        config.maxpool = True
+        config.img_size = (14, 14)
+        config.data_mean = None
+        config.data_std = None
+
+        config.save_dir = "../../../out/MNIST_minimal_maxpool"
+        config.load_file = config.save_dir + "/mnist_minimal_maxpool_checkpoint.pt"
+        config.filename = config.save_dir + "/mnist_minimal_maxpool_cinn.pt"
 
     if args.train:
         # model training

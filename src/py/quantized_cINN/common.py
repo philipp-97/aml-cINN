@@ -100,6 +100,51 @@ class MNISTData:
         return (x - self.c.data_mean) / self.c.data_std
 
 
+class MNISTDataPreprocessed:
+
+    def __init__(self, config: object):
+        from torch.utils.data import Dataset, DataLoader, TensorDataset
+        import torchvision.transforms as T
+        import torchvision.datasets as D
+        import torch.nn as nn
+
+        self.c = config
+
+        self.maxpool = nn.MaxPool2d(kernel_size=2)
+        self.train_data = D.MNIST(self.c.mnist_data,
+                                  train=True,
+                                  download=True,
+                                  transform=T.Compose([T.ToTensor(), self.maxpool]))
+        self.test_data = D.MNIST(self.c.mnist_data,
+                                 train=False,
+                                 download=True,
+                                 transform=T.Compose([T.ToTensor(), self.maxpool]))
+
+        # Sample a fixed batch of 1024 validation examples
+        self.val_x, self.val_l = zip(*list(self.train_data[i] for i in range(1024)))
+        self.val_x = torch.stack(self.val_x, 0).to(config.device)
+        self.val_l = torch.LongTensor(self.val_l).to(config.device)
+
+        # Exclude the validation batch from the training data
+        self.train_data.data = self.train_data.data[1024:]
+        self.train_data.targets = self.train_data.targets[1024:]
+
+        # Add the noise-augmentation to the (non-validation) training data:
+        augm_func = lambda x: x + self.c.add_image_noise * torch.randn_like(x)
+        self.train_data.transform = T.Compose([self.train_data.transform, augm_func])
+
+        self.train_loader = DataLoader(self.train_data,
+                                       batch_size=self.c.batch_size,
+                                       shuffle=True,
+                                       num_workers=self.c.n_workers,
+                                       pin_memory=True, drop_last=True)
+        self.test_loader = DataLoader(self.test_data,
+                                      batch_size=self.c.batch_size,
+                                      shuffle=False,
+                                      num_workers=self.c.n_workers,
+                                      pin_memory=True, drop_last=True)
+
+
 def one_hot(labels, out=None):
     '''
     Convert LongTensor labels (contains labels 0-9), to a one hot vector.
@@ -447,8 +492,8 @@ def val_set_pca(model, data, config, I=0,C=9):
     """
     Perform PCA uing the latent codes of the validation set, to identify disentagled
     and semantic latent dimensions.
-    I:          
-    C:          
+    I:
+    C:
     save_as:    Optional filename to save the image.
 
     :param model:
@@ -563,14 +608,15 @@ def show_samples(model, data, config, label):
 
     with torch.no_grad():
         samples = model.reverse_sample(z, l)[0].cpu().numpy()
-        samples = data.unnormalize(samples)
+        if not data.maxpool:
+            samples = data.unnormalize(samples)
 
-    full_image = np.zeros((28*10, 28*10))
+    full_image = np.zeros((config.img_size[0] * 10, config.img_size[1] * 10))
 
     for k in range(N_samples):
         i, j = k // 10, k % 10
-        full_image[28 * i : 28 * (i + 1),
-                   28 * j : 28 * (j + 1)] = samples[k, 0]
+        full_image[config.img_size[0] * i : config.img_size[0] * (i + 1),
+                   config.img_size[1] * j : config.img_size[1] * (j + 1)] = samples[k, 0]
 
     full_image = np.clip(full_image, 0, 1)
     plt.figure()
