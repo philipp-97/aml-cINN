@@ -61,7 +61,7 @@ class CONFIG(baseCONFIG):
 
     # Architecture
     n_blocks = 20
-    internal_width = 512
+    internal_width = 128
     clamping = 1.0
     fc_dropout = 0.0
 
