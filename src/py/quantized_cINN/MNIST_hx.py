@@ -22,6 +22,7 @@ import FrEIA.framework as Ff
 import FrEIA.modules as Fm
 
 import hxtorch
+import _hxtorch
 import hxtorch.nn as hxnn
 
 from common import one_hot, MNISTData, MNISTDataPreprocessed, baseCONFIG, \
@@ -129,6 +130,16 @@ class MNISTcINN_hx(nn.Module):
 
     def build_inn(self):
 
+        def scale_input_clamp(x_in: torch.Tensor) -> torch.Tensor:
+            """
+            Scales the tensor to the maximal input range of BrainScaleS-2.
+            Clamps negative values to 0.
+            """
+            max_in = torch.max(x_in)
+            factor = \
+                _hxtorch.constants.input_activation_max / max_in if max_in > 0 else 1
+            return torch.clamp(x_in * factor, min=0., max=31.)
+
         def fc_subnet(ch_in, ch_out):
             #return nn.Sequential(nn.Linear(ch_in, self.c.internal_width),
             #                     nn.ReLU(),
@@ -144,7 +155,7 @@ class MNISTcINN_hx(nn.Module):
                                                     # lower values may lead to saturation
                                                     # effects in the drivers.
                             mock=self.c.mock,       # enables simulation-mode.
-                            input_transform=hxnn.scale_input),
+                            input_transform=scale_input_clamp),
                 hxnn.ConvertingReLU(shift=1,  # shifts the output by 1 bit,
                                               # i.e. divides it by 2.
                                     mock=self.c.mock),
@@ -153,7 +164,8 @@ class MNISTcINN_hx(nn.Module):
                             bias=True,
                             num_sends=3,
                             wait_between_events=2,
-                            mock=self.c.mock))
+                            mock=self.c.mock,
+                            input_transform=scale_input_clamp))
 
 
         cond = Ff.ConditionNode(10)
@@ -174,7 +186,6 @@ class MNISTcINN_hx(nn.Module):
         return Ff.ReversibleGraphNet(nodes, verbose=False)
 
     def forward(self, x, l, jac=True):
-        print("min:", torch.min(x), "max:", torch.max(x))
         return self.cinn(x, c=one_hot(l, scale=31.), jac=jac)
 
     def reverse_sample(self, z, l, jac=True):
