@@ -1,4 +1,5 @@
 import math
+from typing import Dict
 
 import torch
 from torch import Tensor
@@ -38,7 +39,7 @@ class DynamicScaling(Module):
     weight: Tensor
 
     def __init__(self, features: int, bias: bool = True,
-                device=None, dtype=None) -> None:
+                device=None, dtype=None, init: Dict[str, float]=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(DynamicScaling, self).__init__()
         self.features = features
@@ -48,7 +49,11 @@ class DynamicScaling(Module):
             self.bias = Parameter(torch.empty(features, **factory_kwargs))
         else:
             self.register_parameter('bias', None)
-        self.reset_parameters()
+
+        if init:
+            self.reset_parameters_static(init)
+        else:
+            self.reset_parameters()
 
     def reset_parameters(self) -> None:
         init.kaiming_uniform_(torch.diag(self.weight), a=math.sqrt(5))
@@ -57,8 +62,13 @@ class DynamicScaling(Module):
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
             init.uniform_(self.bias, -bound, bound)
 
+    def reset_parameters_static(self, init: Dict[str, float]):
+        for p, v in init.items():
+            nn.init._no_grad_fill_(getattr(self, p), v)
+
     def forward(self, input: Tensor) -> Tensor:
         return F.linear(input, torch.diag(self.weight), self.bias)
+
 
     def extra_repr(self) -> str:
         return 'features={}, bias={}'.format(
@@ -93,10 +103,11 @@ class FixedRangeScaling(Module):
     def forward(self, input: Tensor) -> Tensor:
         if self.training:
             max_abs, _ = torch.max(torch.abs(input), axis=0)
-            if not per_feature:
-                max_abs = torch.max(max_abs, keepdim=True)
+            if not self.per_feature:
+                max_abs.fill_(max_abs.max())
             max_abs[max_abs == 0.] = self.max_out
-            self.weight = self.max_out / max_abs
+            with torch.no_grad:
+                self.weight.data = self.max_out / max_abs
         return F.linear(input, torch.diag(self.weight))
 
     def extra_repr(self) -> str:
