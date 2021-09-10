@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch.nn import functional as F
-from torch.init import init
+from torch.nn import init
 from torch.nn.modules import Module
 
 
@@ -58,7 +58,6 @@ class DynamicScaling(Module):
             init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input: Tensor) -> Tensor:
-        if elementwise_affine
         return F.linear(input, torch.diag(self.weight), self.bias)
 
     def extra_repr(self) -> str:
@@ -66,3 +65,41 @@ class DynamicScaling(Module):
             self.features, self.bias is not None
         )
 
+
+class FixedRangeScaling(Module):
+    r"""
+    """
+    __constants__ = ['features', 'max_out']
+    per_feature: bool
+    features: int
+    max_out: int
+    weight: Tensor
+
+    def __init__(self, features: int, max_out: int, per_feature: bool = False,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(FixedRangeScaling, self).__init__()
+        self.features = features
+        self.max_out = max_out
+        self.per_feature = per_feature
+
+        self.weight = Parameter(torch.empty(features, **factory_kwargs),
+                                requires_grad=False)
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        init.ones_(self.weight)
+
+    def forward(self, input: Tensor) -> Tensor:
+        if self.training:
+            max_abs, _ = torch.max(torch.abs(input), axis=0)
+            if not per_feature:
+                max_abs = torch.max(max_abs, keepdim=True)
+            max_abs[max_abs == 0.] = self.max_out
+            self.weight = self.max_out / max_abs
+        return F.linear(input, torch.diag(self.weight))
+
+    def extra_repr(self) -> str:
+        return 'features={}, max_out={}, per_feature={}'.format(
+            self.features, self.max_out, self.per_feature
+        )
