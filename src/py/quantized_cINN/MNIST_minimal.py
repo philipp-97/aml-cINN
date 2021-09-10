@@ -52,7 +52,7 @@ class CONFIG(baseCONFIG):
     milestones = [20, 40]
     betas = (0.9, 0.999)
 
-    n_epochs = 60
+    n_epochs = 20
 
     init_scale = 0.03
     pre_low_lr = 0
@@ -86,8 +86,10 @@ class CONFIG(baseCONFIG):
     mnist_data = "../../../mnist_data"
     save_dir = "../../../out/MNIST_minimal"
 
-    load_file = "../../../out/MNIST_minimal/mnist_minimal_checkpoint.pt"
-    filename = "../../../out/MNIST_minimal/mnist_minimal_cinn.pt"
+    load_file = "../../../out/MNIST_minimal/mnist_minimal_checkpoint_" +  \
+            f"width{internal_width}_epochs{n_epochs}.pt"
+    filename = "../../../out/MNIST_minimal/mnist_minimal_cinn_" + \
+            f"width{internal_width}_epochs{n_epochs}.pt"
 
     checkpoint_save_interval =  20
     checkpoint_save_overwrite = True
@@ -211,19 +213,20 @@ def train(config):
                 model.optimizer.step()
                 model.optimizer.zero_grad()
 
-                if not i_batch % 50:
-                    with torch.no_grad():
-                        z, log_j = model(data.val_x, data.val_l)
-                        nll_val = torch.mean(z**2) / 2 - torch.mean(log_j) / np.prod(config.img_size)
+                with torch.no_grad():
+                    model.eval()
+                    z, log_j = model(data.val_x, data.val_l)
+                    nll_val = torch.mean(z**2) / 2 - torch.mean(log_j) / np.prod(config.img_size)
+                    model.train()
 
-                    print('%.3i \t%.5i/%.5i \t%.2f \t%.6f\t%.6f\t%.2e' % (i_epoch,
-                                                                    i_batch, len(data.train_loader),
-                                                                    (time() - t_start)/60.,
-                                                                    np.mean(nll_mean),
-                                                                    nll_val.item(),
-                                                                    model.optimizer.param_groups[0]['lr'],
-                                                                    ), flush=True)
-                    nll_mean = []
+            print('%.3i \t%.5i/%.5i \t%.2f \t%.6f\t%.6f\t%.2e' % (i_epoch,
+                                                            i_batch, len(data.train_loader),
+                                                            (time() - t_start)/60.,
+                                                            np.mean(nll_mean),
+                                                            nll_val.item(),
+                                                            model.optimizer.param_groups[0]['lr'],
+                                                            ), flush=True)
+            nll_mean = []
 
             model.weight_scheduler.step()
 
@@ -254,11 +257,12 @@ def evaluate(config):
     #    temperature(0.88, columns=1, save_as='./images/samples/T_%.4i.png' % (s))
     #    plt.title(str(s))
 
+    train_config = f"width{config.internal_width}_epochs{config.n_epochs}"
 
     index_ins = [284, 394, 422, 759, 639, 599, 471, 449, 448, 426]
-    style_transfer(model, data, index_ins, config)
+    style_transfer(model, data, index_ins, config, train_config)
 
-    interpolation(model, config)
+    interpolation(model, config, train_config)
 
     #for j in range(3):
     #    plt.figure()
@@ -270,7 +274,7 @@ def evaluate(config):
     val_loss(model, data, config)
 
     for i in range(10):
-        show_samples(model, data, config, i)
+        show_samples(model, data, config, i, train_config)
 
 
 
@@ -300,8 +304,10 @@ if __name__ == "__main__":
         config.data_std = None
 
         config.save_dir = "../../../out/MNIST_minimal_maxpool"
-        config.load_file = config.save_dir + "/mnist_minimal_maxpool_checkpoint.pt"
-        config.filename = config.save_dir + "/mnist_minimal_maxpool_cinn.pt"
+        config.load_file = config.save_dir + "/mnist_minimal_maxpool_checkpoint_" + \
+            f"width{config.internal_width}_epochs{config.n_epochs}.pt"
+        config.filename = config.save_dir + "/mnist_minimal_maxpool_cinn_" + \
+            f"width{config.internal_width}_epochs{config.n_epochs}.pt"
 
     if args.train:
         # model training

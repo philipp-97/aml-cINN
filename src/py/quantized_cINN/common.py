@@ -381,7 +381,7 @@ def make_testcond(config):
 
 ########################################################################
 
-def interpolation(model, config):
+def interpolation(model, config, train_conf):
     """
     Interpolate between to random latent vectors.
     temp:       Sampling temperature
@@ -391,6 +391,7 @@ def interpolation(model, config):
 
     :param model:
     :param config:
+    :param train_conf:
     :returns: None
     """
 
@@ -430,11 +431,11 @@ def interpolation(model, config):
 
     plt.figure()
     plt.imshow(img_show, cmap='gray', vmin=0, vmax=1)
-    plt.imsave(config.save_dir + "/eval_plt_interplation.pdf",
+    plt.imsave(config.save_dir + "/interpolation_" + train_conf + ".png",
                img_show, cmap='gray', vmin=0, vmax=1)
     plt.close()
 
-def style_transfer(model, data, index_ins, config):
+def style_transfer(model, data, index_ins, config, train_conf):
     """
     Perform style transfer as described in the cINN paper.
     index_in:   Index of the validation image to use for the transfer.
@@ -484,7 +485,7 @@ def style_transfer(model, data, index_ins, config):
         plt.subplot(1,2,2)
         plt.imshow(img_show, cmap='gray', vmin=0, vmax=1)
 
-        plt.imsave(config.save_dir + f"/eval_plt_style_transfer_{index_in}.pdf",
+        plt.imsave(config.save_dir + f"style_transfer_{index_in}_" + train_conf + ".png",
                    img_show, cmap='gray', vmin=0, vmax=1)
         plt.close()
 
@@ -597,7 +598,7 @@ def val_loss(model, data, config):
     print('Validation loss:')
     print(nll_val.item())
 
-def show_samples(model, data, config, label):
+def show_samples(model, data, config, label, train_conf):
     '''produces and shows cINN samples for a given label (0-9)'''
 
     N_samples = 100
@@ -622,4 +623,4 @@ def show_samples(model, data, config, label):
     plt.figure()
     plt.title(F'Generated digits for c={label}')
     plt.imshow(full_image, vmin=0, vmax=1, cmap='gray')
-    plt.savefig(config.save_dir + f"/eval_{label}")
+    plt.savefig(config.save_dir + f"/eval_{label}_" + train_conf + ".png")
