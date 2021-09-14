@@ -1,10 +1,11 @@
 import math
+from typing import Dict
 
 import torch
 from torch import Tensor
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch.nn import functional as F
-from torch.init import init
+from torch.nn import init
 from torch.nn.modules import Module
 
 
@@ -38,7 +39,7 @@ class DynamicScaling(Module):
     weight: Tensor
 
     def __init__(self, features: int, bias: bool = True,
-                device=None, dtype=None) -> None:
+                device=None, dtype=None, init: Dict[str, float]=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(DynamicScaling, self).__init__()
         self.features = features
@@ -48,7 +49,11 @@ class DynamicScaling(Module):
             self.bias = Parameter(torch.empty(features, **factory_kwargs))
         else:
             self.register_parameter('bias', None)
-        self.reset_parameters()
+
+        if init:
+            self.reset_parameters_static(init)
+        else:
+            self.reset_parameters()
 
     def reset_parameters(self) -> None:
         init.kaiming_uniform_(torch.diag(self.weight), a=math.sqrt(5))
@@ -57,12 +62,55 @@ class DynamicScaling(Module):
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
             init.uniform_(self.bias, -bound, bound)
 
+    def reset_parameters_static(self, init: Dict[str, float]):
+        for p, v in init.items():
+            nn.init._no_grad_fill_(getattr(self, p), v)
+
     def forward(self, input: Tensor) -> Tensor:
-        if elementwise_affine
         return F.linear(input, torch.diag(self.weight), self.bias)
+
 
     def extra_repr(self) -> str:
         return 'features={}, bias={}'.format(
             self.features, self.bias is not None
         )
 
+
+class FixedRangeScaling(Module):
+    r"""
+    """
+    __constants__ = ['features', 'max_out']
+    per_feature: bool
+    features: int
+    max_out: int
+    weight: Tensor
+
+    def __init__(self, features: int, max_out: int, per_feature: bool = False,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(FixedRangeScaling, self).__init__()
+        self.features = features
+        self.max_out = max_out
+        self.per_feature = per_feature
+
+        self.weight = Parameter(torch.empty(features, **factory_kwargs),
+                                requires_grad=False)
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        init.ones_(self.weight)
+
+    def forward(self, input: Tensor) -> Tensor:
+        if self.training:
+            max_abs, _ = torch.max(torch.abs(input), axis=0)
+            if not self.per_feature:
+                max_abs.fill_(max_abs.max())
+            max_abs[max_abs == 0.] = self.max_out
+            with torch.no_grad:
+                self.weight.data = self.max_out / max_abs
+        return F.linear(input, torch.diag(self.weight))
+
+    def extra_repr(self) -> str:
+        return 'features={}, max_out={}, per_feature={}'.format(
+            self.features, self.max_out, self.per_feature
+        )
