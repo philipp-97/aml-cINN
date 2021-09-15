@@ -61,7 +61,7 @@ class CONFIG(baseCONFIG):
 
     # Architecture
     n_blocks = 20
-    internal_width = 128
+    internal_width = 256
     clamping = 1.0
     fc_dropout = 0.0
 
@@ -213,11 +213,11 @@ def train(config):
                 model.optimizer.step()
                 model.optimizer.zero_grad()
 
-                with torch.no_grad():
-                    model.eval()
-                    z, log_j = model(data.val_x, data.val_l)
-                    nll_val = torch.mean(z**2) / 2 - torch.mean(log_j) / np.prod(config.img_size)
-                    model.train()
+            with torch.no_grad():
+                model.eval()
+                z, log_j = model(data.val_x, data.val_l)
+                nll_val = torch.mean(z**2) / 2 - torch.mean(log_j) / np.prod(config.img_size)
+                model.train()
 
             print('%.3i \t%.5i/%.5i \t%.2f \t%.6f\t%.6f\t%.2e' % (i_epoch,
                                                             i_batch, len(data.train_loader),

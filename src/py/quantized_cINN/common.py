@@ -431,7 +431,7 @@ def interpolation(model, config, train_conf):
 
     plt.figure()
     plt.imshow(img_show, cmap='gray', vmin=0, vmax=1)
-    plt.imsave(config.save_dir + "/interpolation_" + train_conf + ".png",
+    plt.imsave(config.save_dir + "/interpolation_" + train_conf + ".pdf",
                img_show, cmap='gray', vmin=0, vmax=1)
     plt.close()
 
@@ -485,7 +485,7 @@ def style_transfer(model, data, index_ins, config, train_conf):
         plt.subplot(1,2,2)
         plt.imshow(img_show, cmap='gray', vmin=0, vmax=1)
 
-        plt.imsave(config.save_dir + f"style_transfer_{index_in}_" + train_conf + ".png",
+        plt.imsave(config.save_dir + f"/style_transfer_{index_in}_" + train_conf + ".pdf",
                    img_show, cmap='gray', vmin=0, vmax=1)
         plt.close()
 
