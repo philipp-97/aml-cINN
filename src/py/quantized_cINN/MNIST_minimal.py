@@ -91,6 +91,10 @@ class CONFIG(baseCONFIG):
     filename = "../../../out/MNIST_minimal/mnist_minimal_cinn_" + \
             f"width{internal_width}_epochs{n_epochs}.pt"
 
+
+    loss_means_filename = save_dir + f"/val_losses_means_{n_epochs}e_{internal_width}w.txt"
+    loss_filename = save_dir + f"/val_losses_{n_epochs}e_{internal_width}w.txt"
+
     checkpoint_save_interval =  20
     checkpoint_save_overwrite = True
     checkpoint_on_error = True
@@ -186,6 +190,9 @@ def train(config):
 
     nll_mean = []
 
+    # memorize evolution of losses
+    val_losses_means = np.array([])
+    val_losses = np.array([])
 
     try:
         for i_epoch in range(-config.pre_low_lr, config.n_epochs):
@@ -226,17 +233,21 @@ def train(config):
                                                             nll_val.item(),
                                                             model.optimizer.param_groups[0]['lr'],
                                                             ), flush=True)
+
+            val_losses_means = np.append(val_losses_means, np.mean(nll_mean))
+            val_losses = np.append(val_losses, nll_val.item())
+
             nll_mean = []
 
             model.weight_scheduler.step()
 
-            #if i_epoch > 1 - config.pre_low_lr:
-            #    viz.update_losses(np.mean(nll_mean))
-
             if (i_epoch % config.checkpoint_save_interval) == 0:
                 model.save(config.filename + '_checkpoint_%.4i' % (i_epoch * (1-config.checkpoint_save_overwrite)))
 
+        # save model and losses
         model.save(config.filename)
+        np.savetxt(config.loss_means_filename, val_losses_means)
+        np.savetxt(config.loss_filename, val_losses)
 
     except BaseException as b:
         if config.checkpoint_on_error:
@@ -292,8 +303,6 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--downloadMNIST", action="store_true")
     args = parser.parse_args()
 
-    print(config.str())
-
     if args.downloadMNIST:
         data = MNISTData(config)
 
@@ -309,12 +318,17 @@ if __name__ == "__main__":
         config.filename = config.save_dir + "/mnist_minimal_maxpool_cinn_" + \
             f"width{config.internal_width}_epochs{config.n_epochs}.pt"
 
+        config.loss_means_filename = config.save_dir + f"/val_losses_means_{config.n_epochs}e_{config.internal_width}w.txt"
+        config.loss_filename = config.save_dir + f"/val_losses_{config.n_epochs}e_{config.internal_width}w.txt"
+
     if args.train:
         # model training
+        print(config.str())
         train(config)
 
     if args.eval:
         # model evaluation
+        print(config.str())
         evaluate(config)
 
     print("Done! Exit normaly.")

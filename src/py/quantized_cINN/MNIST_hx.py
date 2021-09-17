@@ -58,7 +58,7 @@ class CONFIG(baseCONFIG):
     milestones = [20, 40]
     betas = (0.9, 0.999)
 
-    n_epochs = 20
+    n_epochs = 5
 
     init_scale = 0.03
     pre_low_lr = 0
@@ -95,6 +95,9 @@ class CONFIG(baseCONFIG):
 
     load_file = "../../../out/MNIST_hx/mnist_hx_checkpoint.pt"
     filename = "../../../out/MNIST_hx/mnist_hx_cinn.pt"
+
+    loss_means_filename = save_dir + f"/val_losses_means_{n_epochs}e_{mock}m.txt"
+    loss_filename = save_dir + f"/val_losses_{n_epochs}e_{mock}m.txt"
 
     checkpoint_save_interval = 1
     checkpoint_save_overwrite = True
@@ -220,6 +223,9 @@ class MNISTcINN_hx(nn.Module):
 
 def train(config):
     model = MNISTcINN_hx(config)
+    ###
+    #model.load(config.filename)
+    ###
     if config.maxpool:
         data = MNISTDataPreprocessed(config)
     else:
@@ -228,6 +234,10 @@ def train(config):
     t_start = time()
 
     nll_mean = []
+
+    # memorize evolution of losses
+    val_losses_means = np.array([])
+    val_losses = np.array([])
 
     try:
         for i_epoch in range(-config.pre_low_lr, config.n_epochs):
@@ -268,18 +278,23 @@ def train(config):
                    (time() - t_start) / 60., np.mean(nll_mean), nll_val.item(),
                    model.optimizer.param_groups[0]['lr'],
                    ), flush=True)
+
+            val_losses_means = np.append(val_losses_means, np.mean(nll_mean))
+            val_losses = np.append(val_losses, nll_val.item())
+
             nll_mean = []
 
             model.weight_scheduler.step()
 
-            #if i_epoch > 1 - config.pre_low_lr:
-            #    viz.update_losses(np.mean(nll_mean))
-
+            # save model at checkpoints
             if (i_epoch % config.checkpoint_save_interval) == 0:
                 model.save(config.filename + '_checkpoint_%.4i' %
                            (i_epoch * (1-config.checkpoint_save_overwrite)))
 
+        # save model and losses
         model.save(config.filename)
+        np.savetxt(config.loss_means_filename, val_losses_means)
+        np.savetxt(config.loss_filename, val_losses)
 
     except BaseException as b:
         if config.checkpoint_on_error:
@@ -325,8 +340,6 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--downloadMNIST", action="store_true")
     args = parser.parse_args()
 
-    print(config.str())
-
     if args.downloadMNIST:
         data = MNISTData(config)
 
@@ -345,10 +358,12 @@ if __name__ == "__main__":
 
     if args.train:
         # model training
+        print(config.str())
         train(config)
 
     if args.eval:
         # model evaluation
+        print(config.str())
         evaluate(config)
 
     print("Done! Exit normaly.")
