@@ -22,7 +22,7 @@ import torch.nn as nn
 import FrEIA.framework as Ff
 import FrEIA.modules as Fm
 
-from common import one_hot, MNISTData, baseCONFIG, \
+from common import one_hot, MNISTData, MNISTDataPreprocessed, baseCONFIG, \
                    Visualizer, LiveVisualizer, sample_outputs, \
                    style_transfer, interpolation, val_loss, show_samples
 
@@ -40,6 +40,8 @@ class CONFIG(baseCONFIG):
     data_std = 0.305
     add_image_noise = 0.08
 
+    maxpool = False
+
     img_size = (28, 28)
     device = "cuda"
     n_workers = 16
@@ -53,7 +55,7 @@ class CONFIG(baseCONFIG):
     milestones = [20, 40]
     betas = (0.9, 0.999)
 
-    n_epochs = 60
+    n_epochs = 40
 
     init_scale = 0.03
     pre_low_lr = 0
@@ -62,7 +64,7 @@ class CONFIG(baseCONFIG):
 
     # Architecture
     n_blocks = 20
-    internal_width = 512
+    internal_width = 256
     clamping = 1.0
     fc_dropout = 0.0
 
@@ -84,10 +86,15 @@ class CONFIG(baseCONFIG):
 
     # Paths
     mnist_data = "../../../mnist_data"
-    save_dir = "../../../out/MNIST_quantized"
+    save_dir = "../../../out/MNIST_quantized_qat"
 
-    load_file = "../../../out/MINST_quantized/mnist_minimal_checkpoint.pt"
-    filename = "../../../out/MNIST_quantized/mnist_minimal_cinn.pt"
+    load_file = "../../../out/MNIST_quantized_qat/mnist_minimal_checkpoint_" +  \
+            f"width{internal_width}_epochs{n_epochs}.pt"
+    filename = "../../../out/MNIST_quantized_qat/mnist_minimal_cinn_" + \
+            f"width{internal_width}_epochs{n_epochs}.pt"
+
+    loss_means_filename = save_dir + f"/val_losses_means_{n_epochs}e_{internal_width}w.txt"
+    loss_filename = save_dir + f"/val_losses_{n_epochs}e_{internal_width}w.txt"
 
     checkpoint_save_interval = 20
     checkpoint_save_overwrite = True
@@ -182,7 +189,7 @@ class MNISTcINN_quantized(nn.Module):
         # Prepare the model for QAT. This inserts observers and fake_
         # quants in the model that will observe weight and activation
         # tensors during calibration.
-        torch.quantization.prepare(self, inplace=True)
+        torch.quantization.prepare_qat(self, inplace=True)
 
         if calibration:
             subnet = "cinn.module_list.2.subnet1."
@@ -190,15 +197,16 @@ class MNISTcINN_quantized(nn.Module):
             print("in quantize before calibration")
             print(self.state_dict()[subnet + act_pp + "min_val"])
             print(self.state_dict()[subnet + act_pp + "max_val"])
-            print(self.state_dict()[subnet + "fuco1.0.weight"])
+            #print(self.state_dict()[subnet + "fuco1.0.weight"])
 
+            train_config = f"width{config.internal_width}_epochs{config.n_epochs}"
             for k in range(10):
-                calibration(self, data, self.c, k)
+                calibration(self, data, self.c, k, train_config)
 
             print("in quantize after calibration")
             print(self.state_dict()[subnet + act_pp + "min_val"])
             print(self.state_dict()[subnet + act_pp + "max_val"])
-            print(self.state_dict()[subnet + "fuco1.0.weight"])
+            #print(self.state_dict()[subnet + "fuco1.0.weight"])
 
         torch.quantization.convert(self, inplace=True)
 
@@ -232,10 +240,17 @@ class MNISTcINN_quantized(nn.Module):
 
 def train(config):
     model = MNISTcINN_quantized(config)
-    data = MNISTData(config)
+    if config.maxpool:
+        data = MNISTDataPreprocessed(config)
+    else:
+        data = MNISTData(config)
 
     t_start = time()
     nll_mean = []
+
+    # memorize evolution of losses
+    val_losses_means = np.array([])
+    val_losses = np.array([])
 
     try:
         for i_epoch in range(-config.pre_low_lr, config.n_epochs):
@@ -264,24 +279,24 @@ def train(config):
                 model.optimizer.step()
                 model.optimizer.zero_grad()
 
-                if not i_batch % 50:
-                    with torch.no_grad():
-                        z, log_j = model(data.val_x, data.val_l)
-                        nll_val = torch.mean(z**2) / 2 - torch.mean(log_j) /\
-                            np.prod(config.img_size)
+            with torch.no_grad():
+                z, log_j = model(data.val_x, data.val_l)
+                nll_val = torch.mean(z**2) / 2 - torch.mean(log_j) /\
+                    np.prod(config.img_size)
 
-                    print('%.3i \t%.5i/%.5i \t%.2f \t%.6f\t%.6f\t%.2e' %
-                          (i_epoch, i_batch, len(data.train_loader),
-                           (time() - t_start) / 60., np.mean(nll_mean),
-                           nll_val.item(),
-                           model.optimizer.param_groups[0]['lr']),
-                          flush=True)
-                    nll_mean = []
+            print('%.3i \t%.5i/%.5i \t%.2f \t%.6f\t%.6f\t%.2e' %
+                  (i_epoch, i_batch, len(data.train_loader),
+                   (time() - t_start) / 60., np.mean(nll_mean),
+                   nll_val.item(),
+                   model.optimizer.param_groups[0]['lr']),
+                  flush=True)
+
+            val_losses_means = np.append(val_losses_means, np.mean(nll_mean))
+            val_losses = np.append(val_losses, nll_val.item())
+
+            nll_mean = []
 
             model.weight_scheduler.step()
-
-            #if i_epoch > 1 - config.pre_low_lr:
-            #    viz.update_losses(np.mean(nll_mean))
 
             if (i_epoch % config.checkpoint_save_interval) == 0:
                 model.save(config.filename + '_checkpoint_%.4i' %
@@ -295,12 +310,15 @@ def train(config):
         model.to("cpu")
 
         model.quantize(data, show_samples)
-
+        train_config = f"width{config.internal_width}_epochs{config.n_epochs}"
         for k in range(10):
-            show_samples(model, data, config, k)
+            show_samples(model, data, config, k, train_config)
         #####
 
+        # save model and losses
         model.save(config.filename)
+        np.savetxt(config.loss_means_filename, val_losses_means)
+        np.savetxt(config.loss_filename, val_losses)
 
     except BaseException as b:
         if config.checkpoint_on_error:
@@ -310,7 +328,10 @@ def train(config):
 
 def evaluate(config):
     config.device = "cpu"
-    data = MNISTData(config)
+    if config.maxpool:
+        data = MNISTDataPreprocessed(config)
+    else:
+        data = MNISTData(config)
 
     # instantiate quantized model
     model = MNISTcINN_quantized(config)
@@ -323,10 +344,12 @@ def evaluate(config):
     #                save_as='./images/samples/T_%.4i.png' % (s))
     #    plt.title(str(s))
 
-    index_ins = [284, 394, 422, 759, 639, 599, 471, 449, 448, 426]
-    style_transfer(model, data, index_ins, config)
+    train_config = f"width{config.internal_width}_epochs{config.n_epochs}"
 
-    interpolation(model, config)
+    index_ins = [284, 394, 422, 759, 639, 599, 471, 449, 448, 426]
+    style_transfer(model, data, index_ins, config, train_config)
+
+    interpolation(model, config, train_config)
 
     #for j in range(3):
     #    plt.figure()
@@ -338,7 +361,8 @@ def evaluate(config):
     val_loss(model, data, config)
 
     for i in range(10):
-        show_samples(model, data, config, i)
+        show_samples(model, data, config, i, train_config)
+
 
 ########################################################################
 # execution
@@ -351,6 +375,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=config.str())
     parser.add_argument("-t", "--train", action="store_true")
     parser.add_argument("-e", "--eval", action="store_true")
+    parser.add_argument("-m", "--maxpool", action="store_true")
     parser.add_argument("-d", "--downloadMNIST", action="store_true")
     args = parser.parse_args()
 
@@ -360,6 +385,21 @@ if __name__ == "__main__":
 
     if args.downloadMNIST:
         data = MNISTData(config)
+
+    if args.maxpool:
+        config.maxpool = True
+        config.img_size = (14, 14)
+        config.data_mean = None
+        config.data_std = None
+
+        config.save_dir = "../../../out/MNIST_quantized_qat_maxpool"
+        config.load_file = config.save_dir + "/mnist_quantized_qat_maxpool_checkpoint_" + \
+            f"width{config.internal_width}_epochs{config.n_epochs}.pt"
+        config.filename = config.save_dir + "/mnist_quantized_qat_maxpool_cinn_" + \
+            f"width{config.internal_width}_epochs{config.n_epochs}.pt"
+
+        config.loss_means_filename = config.save_dir + f"/val_losses_means_{config.n_epochs}e_{config.internal_width}w.txt"
+        config.loss_filename = config.save_dir + f"/val_losses_{config.n_epochs}e_{config.internal_width}w.txt"
 
     if args.train:
         # model training
