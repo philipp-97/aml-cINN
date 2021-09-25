@@ -115,20 +115,27 @@ class FixedRangeScaling(Module):
         init.ones_(self.weight)
 
     def forward(self, input_: Tensor) -> Tensor:
-        if self.training:
-            max_abs, _ = torch.max(torch.abs(input_), axis=0)
-            if not self.per_feature:
-                max_abs.fill_(max_abs.max())
-            max_abs[max_abs == 0.] = self.max_out
-            with torch.no_grad():
-                self.weight.data = self.max_out / max_abs
+        #if self.training:
+        max_abs, _ = torch.max(torch.abs(input_), axis=0)
+        if not self.per_feature:
+            max_abs.fill_(max_abs.max())
+        max_abs[max_abs == 0.] = self.max_out
+        with torch.no_grad():
+            self.weight.data = self.max_out / max_abs
         res = F.linear(input_, torch.diag(self.weight))
+#        print("x_in min:", torch.min(input_).data.item(),
+#              "x_in max:", torch.max(input_).data.item(),
+#              "max_abs:", max_abs.data[0].item(),
+#              "factor:", self.weight.data[0].item(),
+#              "out min:", torch.min(res).data.item(),
+#              "out max:", torch.max(res).data.item())
         res[res > 0] = torch.floor(res[res > 0])
         res[res < 0] = torch.ceil(res[res < 0])
         # FIXME: This is needed for the last batch. Why? -> debug
         if torch.max(res).data.item() > 31 or torch.min(res).data.item() < -31:
             print("clamping", torch.max(res).data.item())
         return torch.clamp(res, min=-31, max=31)
+        #return res
 
     def extra_repr(self) -> str:
         return 'features={}, max_out={}, per_feature={}'.format(

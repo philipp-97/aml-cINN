@@ -23,6 +23,7 @@ import FrEIA.framework as Ff
 import FrEIA.modules as Fm
 
 from _hxtorch.constants import input_activation_max
+import hxtorch
 import hxtorch.nn as hxnn
 
 from common import one_hot, MNISTData, MNISTDataPreprocessed, baseCONFIG, \
@@ -58,7 +59,7 @@ class CONFIG(baseCONFIG):
     milestones = [20, 40]
     betas = (0.9, 0.999)
 
-    n_epochs = 5
+    n_epochs = 40
 
     init_scale = 0.03
     pre_low_lr = 0
@@ -69,7 +70,7 @@ class CONFIG(baseCONFIG):
 
     # Architecture
     n_blocks = 20
-    internal_width = 128
+    internal_width = 64
     clamping = 1.0
     fc_dropout = 0.0
 
@@ -94,7 +95,8 @@ class CONFIG(baseCONFIG):
     save_dir = "../../../out/MNIST_hx"
 
     load_file = "../../../out/MNIST_hx/mnist_hx_checkpoint.pt"
-    filename = "../../../out/MNIST_hx/mnist_hx_cinn.pt"
+    load_filename = "../../../out/MNIST_hx/mnist_hx_cinn.pt"
+    filename = "../../../out/MNIST_hx/mnist_hx_cinn1.pt"
 
     loss_means_filename = save_dir + f"/val_losses_means_{n_epochs}e_{mock}m.txt"
     loss_filename = save_dir + f"/val_losses_{n_epochs}e_{mock}m.txt"
@@ -144,6 +146,12 @@ class MNISTcINN_hx(nn.Module):
             max_abs = torch.max(torch.abs(x_in))
             factor = input_activation_max / max_abs \
                 if max_abs != 0 else 1
+            #print("x_in min:", torch.min(x_in),
+            #      "x_in max:", torch.max(x_in),
+            #      "max_abs:", max_abs,
+            #      "factor:", factor,
+            #      "out min:", torch.min(x_in * factor),
+            #      "out max:", torch.max(x_in * factor))
             return x_in * factor
 
         def fc_subnet(ch_in, ch_out):
@@ -222,9 +230,13 @@ class MNISTcINN_hx(nn.Module):
 # helper
 
 def train(config):
+
+    if not config.mock:
+        hxtorch.init_hardware()
+
     model = MNISTcINN_hx(config)
     ###
-    #model.load(config.filename)
+    #model.load("../../../out/MNIST_hx_maxpool/mnist_hx_maxpool_cinn.pt")
     ###
     if config.maxpool:
         data = MNISTDataPreprocessed(config)
@@ -238,6 +250,9 @@ def train(config):
     # memorize evolution of losses
     val_losses_means = np.array([])
     val_losses = np.array([])
+
+    # set no noise
+    hxtorch.set_mock_parameter(hxtorch.MockParameter(noise_std=0))
 
     try:
         for i_epoch in range(-config.pre_low_lr, config.n_epochs):
@@ -303,13 +318,21 @@ def train(config):
 
 
 def evaluate(config):
+
+    if not config.mock:
+        hxtorch.init_hardware()
+
     model = MNISTcINN_hx(config)
     model.load(config.filename)
+    #model.load("../../../out/MNIST_hx_maxpool/mnist_hx_maxpool_cinn.pt")
     model.eval()
     if config.maxpool:
         data = MNISTDataPreprocessed(config)
     else:
         data = MNISTData(config)
+
+    # set no noise
+    hxtorch.set_mock_parameter(hxtorch.MockParameter(noise_std=0))
 
     train_config = f"width{config.internal_width}_epochs{config.n_epochs}"
 
@@ -343,6 +366,9 @@ if __name__ == "__main__":
     if args.downloadMNIST:
         data = MNISTData(config)
 
+    if args.mock:
+        config.mock = True
+
     if args.maxpool:
         config.maxpool = True
         config.img_size = (14, 14)
@@ -350,11 +376,11 @@ if __name__ == "__main__":
         config.data_std = None
 
         config.save_dir = "../../../out/MNIST_hx_maxpool"
-        config.load_file = config.save_dir + "/mnist_hx_maxpool_checkpoint.pt"
-        config.filename = config.save_dir + "/mnist_hx_maxpool_cinn.pt"
+        #config.load_file = config.save_dir + "/mnist_hx_maxpool_checkpoint_nonoise.pt"
+        config.filename = config.save_dir + f"/mnist_hx_maxpool_cinn_{config.n_epochs}e_{config.internal_width}w_{config.mock}m.pt"
 
-    if args.mock:
-        config.mock = True
+        loss_means_filename = config.save_dir + f"/val_losses_means_{config.n_epochs}e_{config.mock}m_nonoise.txt"
+        loss_filename = config.save_dir + f"/val_losses_{config.n_epochs}e_{config.mock}m_nonoise.txt"
 
     if args.train:
         # model training

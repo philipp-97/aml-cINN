@@ -55,7 +55,7 @@ class CONFIG(baseCONFIG):
     milestones = [20, 40]
     betas = (0.9, 0.999)
 
-    n_epochs = 40
+    n_epochs = 20
 
     init_scale = 0.03
     pre_low_lr = 0
@@ -64,7 +64,7 @@ class CONFIG(baseCONFIG):
 
     # Architecture
     n_blocks = 20
-    internal_width = 256
+    internal_width = 64
     clamping = 1.0
     fc_dropout = 0.0
 
@@ -86,11 +86,11 @@ class CONFIG(baseCONFIG):
 
     # Paths
     mnist_data = "../../../mnist_data"
-    save_dir = "../../../out/MNIST_quantized_qat"
+    save_dir = "../../../out/MNIST_quantized_qat_before"
 
-    load_file = "../../../out/MNIST_quantized_qat/mnist_minimal_checkpoint_" +  \
+    load_file = "../../../out/MNIST_quantized_qat_before/mnist_minimal_checkpoint_" +  \
             f"width{internal_width}_epochs{n_epochs}.pt"
-    filename = "../../../out/MNIST_quantized_qat/mnist_minimal_cinn_" + \
+    filename = "../../../out/MNIST_quantized_qat_before/mnist_minimal_cinn_" + \
             f"width{internal_width}_epochs{n_epochs}.pt"
 
     loss_means_filename = save_dir + f"/val_losses_means_{n_epochs}e_{internal_width}w.txt"
@@ -184,13 +184,6 @@ class MNISTcINN_quantized(nn.Module):
         quantized implementations.
         """
         self.eval()
-        self.fuse_model()
-
-        # Prepare the model for QAT. This inserts observers and fake_
-        # quants in the model that will observe weight and activation
-        # tensors during calibration.
-        torch.quantization.prepare_qat(self, inplace=True)
-
         if calibration:
             subnet = "cinn.module_list.2.subnet1."
             act_pp = "quant.activation_post_process.activation_post_process."
@@ -244,6 +237,13 @@ def train(config):
         data = MNISTDataPreprocessed(config)
     else:
         data = MNISTData(config)
+
+    model.fuse_model()
+
+    # Prepare the model for QAT. This inserts observers and fake_
+    # quants in the model that will observe weight and activation
+    # tensors during calibration.
+    torch.quantization.prepare_qat(model, inplace=True)
 
     t_start = time()
     nll_mean = []
@@ -335,6 +335,14 @@ def evaluate(config):
 
     # instantiate quantized model
     model = MNISTcINN_quantized(config)
+
+    model.fuse_model()
+
+    # Prepare the model for QAT. This inserts observers and fake_
+    # quants in the model that will observe weight and activation
+    # tensors during calibration.
+    torch.quantization.prepare_qat(model, inplace=True)
+
     model.quantize(data)
     model.load(config.filename)
 
@@ -392,7 +400,7 @@ if __name__ == "__main__":
         config.data_mean = None
         config.data_std = None
 
-        config.save_dir = "../../../out/MNIST_quantized_qat_maxpool"
+        config.save_dir = "../../../out/MNIST_quantized_qat_before_maxpool"
         config.load_file = config.save_dir + "/mnist_quantized_qat_maxpool_checkpoint_" + \
             f"width{config.internal_width}_epochs{config.n_epochs}.pt"
         config.filename = config.save_dir + "/mnist_quantized_qat_maxpool_cinn_" + \
